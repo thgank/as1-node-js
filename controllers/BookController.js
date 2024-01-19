@@ -4,8 +4,8 @@ const BookModel = require('../models/BookModel');
 const { validateName, validateAuthor, validatePublishYear, validatePagesCount, validatePrice } = require('../utils/validationUtils');
 
 const router = express.Router();
+router.use(bodyParser.urlencoded({ extended: true }));
 router.use(bodyParser.json());
-
 // Example data (you may want to use a database in a real-world scenario)
 let books = [];
 let authors = [];
@@ -78,6 +78,66 @@ router.get('/books', async (req, res) => {
         // Apply sorting based on query parameters
         if (req.query.sortBy) {
             const sortBy = req.query.sortBy.toLowerCase();
+
+            if (sortBy === 'price') {
+                if (req.query.sortOrder === 'asc') {
+                    filteredBooks.sort((a, b) => a.Price - b.Price);
+                } else if (req.query.sortOrder === 'desc') {
+                    filteredBooks.sort((a, b) => b.Price - a.Price);
+                }
+            } else if (sortBy === 'id') {
+                if (req.query.sortOrder === 'asc') {
+                    filteredBooks.sort((a, b) => a.ID - b.ID);
+                } else if (req.query.sortOrder === 'desc') {
+                    filteredBooks.sort((a, b) => b.ID - a.ID);
+                }
+                // else if (sortBy === 'pagesCount') {
+                //     if (req.query.sortOrder === 'asc') {
+                //         filteredBooks.sort((a, b) => a.PagesCount - b.PagesCount);
+                //     } else if (req.query.sortOrder === 'desc') {
+                //         filteredBooks.sort((a, b) => b.PagesCount - a.PagesCount);
+                //     }
+                // }
+            }
+        }
+
+        if (req.query.search) {
+            const searchTerm = req.query.search.toLowerCase();
+            filteredBooks = filteredBooks.filter(book => book.Name.toLowerCase().includes(searchTerm));
+        }
+
+        return res.status(200).json(filteredBooks);
+    } catch (error) {
+        console.error('Error reading books:', error.message);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
+router.get('/books/paginated', async (req, res) => {
+    try {
+        // Read data from the Excel file
+        books = await BookModel.readExcelData('dummy_books.xlsx');
+
+        // Pagination parameters
+        const page = parseInt(req.query.page) || 1;
+        const pageSize = parseInt(req.query.pageSize) || 10;
+
+        // Apply filters based on query parameters
+        let filteredBooks = [...books];
+
+        if (req.query.minPrice) {
+            const minPrice = parseFloat(req.query.minPrice);
+            filteredBooks = filteredBooks.filter(book => book.Price >= minPrice);
+        }
+
+        if (req.query.maxPrice) {
+            const maxPrice = parseFloat(req.query.maxPrice);
+            filteredBooks = filteredBooks.filter(book => book.Price <= maxPrice);
+        }
+
+        // Apply sorting based on query parameters
+        if (req.query.sortBy) {
+            const sortBy = req.query.sortBy.toLowerCase();
             if (sortBy === 'price') {
                 if (req.query.sortOrder === 'asc') {
                     filteredBooks.sort((a, b) => a.Price - b.Price);
@@ -93,7 +153,18 @@ router.get('/books', async (req, res) => {
             filteredBooks = filteredBooks.filter(book => book.Name.toLowerCase().includes(searchTerm));
         }
 
-        return res.status(200).json(filteredBooks);
+        // Pagination logic
+        const startIndex = (page - 1) * pageSize;
+        const endIndex = startIndex + pageSize;
+        const paginatedBooks = filteredBooks.slice(startIndex, endIndex);
+
+        return res.status(200).json({
+            totalItems: filteredBooks.length,
+            totalPages: Math.ceil(filteredBooks.length / pageSize),
+            currentPage: page,
+            pageSize: pageSize,
+            books: paginatedBooks
+        });
     } catch (error) {
         console.error('Error reading books:', error.message);
         res.status(500).json({ error: 'Internal Server Error' });
@@ -133,7 +204,6 @@ router.put('/books/update/:id', async (req, res) => {
         }
 
         // Validate the incoming data
-        // (You can customize validation based on your requirements)
         if (!validateName(updatedBookData.Name) || !validateAuthor(updatedBookData.Author) ||
             !validatePublishYear(updatedBookData.PublishYear) || !validatePagesCount(updatedBookData.PagesCount) ||
             !validatePrice(updatedBookData.Price)) {
@@ -143,7 +213,6 @@ router.put('/books/update/:id', async (req, res) => {
         // Update the book data
         Object.assign(bookToUpdate, updatedBookData);
 
-        // Optionally, you can also write the updated data to the Excel file
         await BookModel.writeExcelData('dummy_books.xlsx', books);
 
         return res.status(200).json(bookToUpdate);
@@ -163,7 +232,7 @@ router.delete('/books/delete/:id', async (req, res) => {
 
         // Find the index of the book to delete
         const bookIndex = books.findIndex(book => parseInt(book.ID) === bookId);
-        console.log('Book index to delete:', bookIndex);
+        // console.log('Book index to delete:', bookIndex);
 
         if (bookIndex === -1) {
             return res.status(404).json({ error: 'Book not found' });
@@ -172,9 +241,6 @@ router.delete('/books/delete/:id', async (req, res) => {
         // Remove the book from the list
         books.splice(bookIndex, 1);
 
-
-        // Optionally, you can also write the updated data to the Excel file
-        // Comment out this line and check if the deletion works without writing
         await BookModel.writeExcelData('dummy_books.xlsx', books);
 
         return res.status(204).send();
